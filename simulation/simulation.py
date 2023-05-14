@@ -8,6 +8,7 @@ Perform calculations that rely on YSFlight source code calculations
 
 # Import standard modules
 
+
 # Import 3rd Party Modules
 import numpy as np
 
@@ -15,7 +16,6 @@ import numpy as np
 
 
 # Define constants
-
 YSFLIGHT_G = 9.807
 
 
@@ -52,9 +52,63 @@ def calculate_thrust(altitude: (float, int), airspeed: (float, int), throttle: (
         raise ValueError
         
     # Determine which type of analysis to perform based on the type of engine
-
+    
+    
     
 
+    
+def calculate_simple_prop_thrust(altitude, airspeed, throttle, airplane_dat):
+    """Calculate the thrust that a simple propeller engine produces at specified altitude, airspeed,
+    and throttle setting.
+    
+    inputs:
+    altitude (float, int): the altitude in meters 
+    airspeed (float, int): the airspeed in m/s
+    throttle (float, 0-1): the throttle setting as a decimal percentage.
+    airplane_dat (N/A): The DAT Properties of an airplane.
+    
+    outputs:
+    thrust (float): thrust force in newtons of the aircraft.
+    """
+    
+    propvmin = airplane_dat['PROPVMIN']
+    propefcy = airplane_dat['PROPEFCY']
+    propellr = airplane_dat['PROPELLR']
+    
+    if airspeed < propvmin:
+        Power = propellr * throttle * propefcy / propvmin
+        thrust = (get_air_density(0) / get_air_density(altitude)) * Power / airspeed
+    else:
+        propk = -1 * (propellr * propefcy) / propvmin**2
+        
+        thrust_static = propellr * propefcy / propvmin
+        thrust = thrust_static - propk * propvmin * airspeed
+        
+    return thrust
+        
+    
+def calculate_jet_thrust(altitude, throttle, afterburner, airplane_dat):
+    """Calculate the thrust that a jet engine produces at specified altitude and throttle setting.
+    
+    inputs:
+    altitude (float, int): the altitude in meters 
+    throttle (float, 0-1): the throttle setting as a decimal percentage.
+    afterburner (bool): if the afterburner is used or not
+    airplane_dat (N/A): The DAT Properties of an airplane.
+    
+    outputs:
+    thrust (float): thrust force in newtons of the aircraft.
+    """
+    
+    n = calculate_jet_efficiency(altitude)
+    if afterburner is True:
+        thrust = n * airplane_dat['THRMILIT'] * (airplane_dat['THRAFTBN'] - airplane_dat['THRMILIT']) * throttle
+    else:
+        thrust = n * airplane_dat['THRMILIT'] * throttle
+        
+    return thrust
+
+    
 def calculate_drag(altitude, airspeed, aoa, airplane_dat):
     """Calculate the drag on the aircraft.
     
@@ -122,7 +176,7 @@ def calculate_jet_efficiency(altitude):
         raise TypeError
     
     ref_alt = [0, 4000, 12000, 16000, 20000, 20000.00001, 36000, 36.000001]
-    ref_n = [1, 1, 0.6, 0.3, 0.0, 0.08, 0.08, 0]
+    ref_n = [1, 1, 0.6, 0.3, 0.0, 0.084991, 0.084991, 0]
 
     return np.interp(altitude, ref_alt, ref_n)
 
