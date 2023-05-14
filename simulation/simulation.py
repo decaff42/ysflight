@@ -6,8 +6,17 @@ Perform calculations that rely on YSFlight source code calculations
 
 """
 
+# Import standard modules
+
+# Import 3rd Party Modules
 import numpy as np
 
+# Import ysflight modules
+
+
+# Define constants
+
+YSFLIGHT_G = 9.807
 
 
 def calculate_thrust(altitude: (float, int), airspeed: (float, int), throttle: (float, int), afterburner: bool, airplane_dat):
@@ -16,6 +25,7 @@ def calculate_thrust(altitude: (float, int), airspeed: (float, int), throttle: (
     inputs:
     altitude (float, int): the altitude in meters 
     airspeed (float, int): the airspeed in m/s
+    afterburner (bool): if the afterburner is used or not
     airplane_dat (N/A): The DAT Properties of an airplane.
     
     output:
@@ -40,6 +50,9 @@ def calculate_thrust(altitude: (float, int), airspeed: (float, int), throttle: (
     if airspeed < 0:
         print("Error: [calculate_thrust] Invalid airspeed input. Expecting greater than zero but got: {}".format(altitude))
         raise ValueError
+        
+    # Determine which type of analysis to perform based on the type of engine
+
     
 
 def calculate_drag(altitude, airspeed, aoa, airplane_dat):

@@ -41,9 +41,13 @@ YSFLIGHT_WEAPON_NAMES = ["B500", "B500HD", "B250", "RKT", "FUEL", "AGM65", "AIM9
 # Import standard modules
 import os
 
+# Import 3rd Party Modules
+import numpy as np
+
 # Import YSFlight Modules
 from ..file import import_file
-from ..unts import convert_unit, determine_units, determine_value_units
+from ..unts import convert_unit, determine_value_units
+from ..simulation.simulation import YSFLIGHT_G, get_air_density
 
 
 def AircraftDat(filepath):
@@ -73,6 +77,7 @@ def AircraftDat(filepath):
     hardpoints = list()
     realprops = dict()
     loadweapons = dict()
+    excameras = list()
     for key in YSFLIGHT_WEAPON_NAMES:
         loadweapons[key] = 0
     
@@ -88,18 +93,30 @@ def AircraftDat(filepath):
                 # Evaluate if we need to prep the turret, and realprop dicts to contain all the parts of the DAT
                 if datvar == "NMTURRET":
                     for i in range(int(parts[0])):
-                        turrets[i] = dict()               
+                        turrets[i] = dict()     
                 elif datvar == "NREALPRP":
                     for i in range(int(parts[0])):
                         realprops[i] = dict()
-                elif datvar == "WPNSHAPE":
+
+                # Handle dat variables that can be fully defined in a single line, but may 
+                # have the same dat variable and would thus be overwritten by just procesing as-is.
+                if datvar == "WPNSHAPE":
                     weaponshapes.append(WeaponShape(line))
-                    continue  # No need for further analysis
+                    continue  # No need for further analysis of this line
                 elif datvar == "HRDPOINT":
                     hardpoints.append(HardPoints(line))
-                    continue  # No need for further analysis
+                    continue  # No need for further analysis of this line
+                elif datvar == "LOADWEPN":
+                    loadweapons[parts[0]] = int(parts[1])
+                    continue  # No need for further analysis of this line
+                elif datvar == "SMOKECOL":
+                    smokecols[int(parts[0])] = [int(i) for i in parts[1:]]
+                    continue  # No need for further analysis of this line
+                elif datvar == "EXCAMERA":
+                    excameras.append(ExCamera(line))
+                    continue  # No need for further analysis of this line
                         
-                # Assign dict/list values for different multiply defined DATVARs
+                # Assign values for properties that take mulitple lines to fully define.
                 if datvar in YSFLIGHT_DAT_TURRET_VARS:
                     turret_id = int(parts[0])
                     parts = parts[1:]   # Ignore the turret ID
@@ -123,16 +140,12 @@ def AircraftDat(filepath):
                             parts[idx] = convert_unit(value, units)
                             
                     realprops[engine_id][datvar] = parts
-                elif datvar == "LOADWEPN":
-                    loadweapons[parts[0]] = int(parts[1])
-                elif datvar == "SMOKECOL":
-                    smokecols[int(parts[0])] = [int(i) for i in parts[1:]]
+
                 else:
                     for idx, part in enumerate(parts):
                         value, units = determine_value_units(part)
                         if units not in ["STRING", "NUMBER", "BOOL"]:
                             parts[idx] = convert_unit(value, units)
-                            
                     dat[datvar] = parts
                 
     
@@ -142,82 +155,55 @@ def AircraftDat(filepath):
     
     
 class AirplaneDat:
-    def __init__(self, raw_dat):
-        self.raw_dat = raw_dat    
-        self.multi_datvar = ["HRDPOINT", "WPNSHAPE", "LOADWEPN", "EXCAMERA", "SMOKEGEN", "TURRETPO",
-                             "TURRETPT", "TURRETHD", "TURRETAM", "TURRETIV", "TURRETNM", "TURRETAR", 
-                             "TURRETCT", "TURRETRG"]
-        
-        self.parse_dat()
-        
-        
-    def parse_dat(self):
-        """Parse in the dat file properties and then perform auto-calculate 
-        calculations for lift and drag.
-        
-        NOTE: REALPROP, SMOKE, TURRETS, EXCAMERAS, HARDPOINTs, and WEAPONSHAPES 
-        can all have duplicate calls in the DAT File and will need to be specially 
-        handled.
-        """
-        
-        
-        # Extract the DAT Variables through automatic parsing for stand-alone dat variables
-        dat = dict()
-        for line in self.raw_dat:
-            if len(line) > 8 and line.startswith("REM") is False:
-                if " " not in line[:8]:
-                    dat[line[:8]] = line[9:].split('#')[0].strip()
-        
-        # Extract Turrent information
-        turrets = dict()
-        if "NMTURRET" in dat.keys():
-            # Need to import turrets.
-            for i in range(int(dat["NMTURRET"])):
-                turrets[i] = Turret(i)
-            
-            lines = [x for x in self.raw_data if x.startswith("TURRET")]
-            for line in lines:
-                data = line.split('#')[0].strip().split()[1:]
-                turrets[int(data[0])].assign(data[2:], data[1])
-                
-                
-        # Extract hardpoint information
-        hardpoints = list()
-        if "HRDPOINT" in dat.keys():
-            lines = [x for x in self.raw_data if x.startswith("HRDPOINT")]
-            for line in lines:
-                if len(line) > 8 and line.startswith("REM") is False:
-                    if line[:8] == "HRDPOINT":
-                        hardpoints.append(HardPoints(line.split('#')[0]))
-                        
-        # Extract Weaponshape information
-        weaponshapes = list()
-        if "WPNSHAPE" in dat.keys():
-            lines = [x for x in self.raw_data if x.startswith("WPNSHAPE")]
-        
-        # Extract Real Propeller information
-        real_props = dict()
-        if "NREALPRP" in dat.keys():
-            for i in range(int(dat["NREALPRP"])):
-                real_props[i] = RealProp(i)
-            
-            lines = [x for x in self.raw_data if x.startswith("REALPROP")]
-            for line in lines:
-                parts = line.split('#')[0].split()[1:]
-                real_props[int(parts[0])].assign(parts[2:], parts[1])
-                
-        # Store extracted data
+    def __init__(self, dat, smokecols, turrets, weaponshapes, hardpoints, realprops, leadweapons, excameras):
         self.dat = dat
+        self.smokecols = smokecols
         self.turrets = turrets
-        self.hardpoints = hardpoints
         self.weaponshapes = weaponshapes
-        self.realprops = real_props
-            
-            
+        self.hardpoints = hardpoints
+        self.realprops = realprops
+        self.loadweapons = leadweapons
+        self.excameras = excameras
+        
+        # Define class properties
+        self.cl_zero = np.nan
+        self.cl_land = np.nan
+        self.cl_slope = np.nan
+        
+        self.cd_zero = np.nan
+        self.cd_land = np.nan
+        self.cd_const = np.nan
+        self.cd_max = np.nan
+        
+        self.t_cruise = np.nan
+        self.t_vmax = np.nan
+        self.t_landing = np.nan
+        
+        # Perform initial analysis
+        self.autocalc()
+        
     def autocalc(self):
         """Automatically calculate the properties from the dat file."""
+        
+        # Caluclate CL properties
+        self.cl_zero = YSFLIGHT_G * (self.dat['WEIGHCLN'] + self.dat["WEIGHTFUEL"]) / (0.5 * get_air_density(self.dat['REFACRUS']) * self.dat['REFVCRUS']**2 * self.dat['WINGAREA'])
+        self.cl_land = YSFLIGHT_G * (self.dat['WEIGHCLN'] + self.dat['WEIGFUEL']) / (0.5 * get_air_density(0) * self.dat['REFVCRUS']**2 * self.dat['WINGAREA']) * (1 / (1 + self.dat['CLBYFLAP'])) * (1 / (1 + self.dat['CLVARGEO']))
+        self.cl_slope = (self.cl_land - self.cl_zero) / (self.dat['REFAOALD'])
+        
+        # Calculate Thrust values
+        
+        
                                
+          
                     
+class ExCamera:
+    def __init__(self, line):
+        self.line = line
+        self.location = line.split()[-1]  # INSIDE, OUTSIDE, CABIN
+        self.name = line.split('"')[1]
+        self.position = [convert_unit(determine_value_units(pos)) for pos in line.split()[2:5]]
+        self.orientation = [convert_unit(determine_value_units(angle)) for angle in line.split()[5:8]]
+        
                     
 class HardPoints:
     def __init__(self, line):
