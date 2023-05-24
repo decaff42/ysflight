@@ -47,7 +47,7 @@ import numpy as np
 # Import YSFlight Modules
 from ..file import import_file
 from ..unts import convert_unit, determine_value_units
-from ..simulation.simulation import YSFLIGHT_G, get_air_density
+from ..simulation.simulation import YSFLIGHT_G, get_air_density, calculate_thrust
 
 
 def AircraftDat(filepath):
@@ -149,20 +149,23 @@ def AircraftDat(filepath):
                     dat[datvar] = parts
                 
     
+    # Package up into class
+    DAT = AirplaneDat(dat, smokecols, turrets, weaponshapes, hardpoints, realprops, loadweapons, excameras)
 
+    return DAT
     
     
     
     
 class AirplaneDat:
-    def __init__(self, dat, smokecols, turrets, weaponshapes, hardpoints, realprops, leadweapons, excameras):
+    def __init__(self, dat, smokecols, turrets, weaponshapes, hardpoints, realprops, loadweapons, excameras):
         self.dat = dat
         self.smokecols = smokecols
         self.turrets = turrets
         self.weaponshapes = weaponshapes
         self.hardpoints = hardpoints
         self.realprops = realprops
-        self.loadweapons = leadweapons
+        self.loadweapons = loadweapons
         self.excameras = excameras
         
         # Define class properties
@@ -179,8 +182,37 @@ class AirplaneDat:
         self.t_vmax = np.nan
         self.t_landing = np.nan
         
+        self.cl_angles = list()
+        self.cl_points = list()
+        
         # Perform initial analysis
+        self.apply_defaults()
         self.autocalc()
+        
+    def apply_defaults(self):
+        """Ensure dat file has default values incorporated incase something requires them."""
+        
+        if "PROPELLR" in self.dat.keys() and "PROPEFCY" not in self.dat.keys():
+            self.dat["PROPEFCY"] = 0.7
+        if "PROPELLR" in self.dat.keys() and "PROPVMIN" not in self.dat.keys():
+            self.dat["PROPVMIN"] = 30
+        if "AIRCLASS" not in self.dat.keys():
+            self.dat["AIRCLASS"] = "AIRPLANE"
+        if "VGWSPED1" not in self.dat.keys():
+            self.dat["VGWSPED1"] = convert_unit(determine_value_units("0.3MACH"))
+        if "VGWSPED2" not in self.dat.keys():
+            self.dat["VGWSPED2"] = convert_unit(determine_value_units("0.8MACH"))
+        if "MAXCDAOA" not in self.dat.keys():
+            self.dat["MAXCDAOA"] = convert_unit(determine_value_units("45deg"))
+        if "FLATCLR1" not in self.dat.keys():
+            self.dat["FLATCLR1"] = convert_unit(determine_value_units("0deg"))
+        if "FLATCLR2" not in self.dat.keys():
+            self.dat["FLATCLR2"] = convert_unit(determine_value_units("0deg"))
+        if "CLDECAY1" not in self.dat.keys():
+            self.dat["CLDECAY1"] = convert_unit(determine_value_units("0deg"))
+        if "CLDECAY2" not in self.dat.keys():
+            self.dat["CLDECAY2"] = convert_unit(determine_value_units("0deg"))
+        
         
     def autocalc(self):
         """Automatically calculate the properties from the dat file."""
@@ -191,9 +223,89 @@ class AirplaneDat:
         self.cl_slope = (self.cl_land - self.cl_zero) / (self.dat['REFAOALD'])
         
         # Calculate Thrust values
+        self.t_cruise = calculate_thrust(self.dat['REFACRUS'], self.dat['REFVCRUS'], self.dat['REFTCRUS'], False, self.dat, self.realprops)
+        self.t_vmax = calculate_thrust(self.dat['REFACRUS'], self.dat['MAXSPEED'], 1.0, True, self.dat, self.realprops)
+        self.t_landing = calculate_thrust(0, self.dat['REFVLAND'], self.dat['REFTLAND'], False, self.dat, self.realprops)
+        
+        # Calculate drag properties
+        self.cd_zero = self.t_cruise / (0.5 * get_air_density(self.dat["REFACRUS"]) * self.dat["REFVCRUS"]**2 * self.dat["WINGAREA"])
+        self.cd_land = (self.t_landing / (0.5 * get_air_density(0) * self.dat["REFVLAND"]**2 * self.dat["WINGAREA"])) * (1 / (1 + self.dat["CLBYFLAP"])) * (1 / (1 + self.dat["CLVARGEO"])) * (1 / (1 + self.dat["CDBYGEAR"]))
+        self.cd_const = (self.cd_land - self.cd_zero) / self.dat["REFAOALD"]**2
+        self.cd_max = self.t_vmax / (0.5 * get_air_density(self.dat["REFACRUS"]) * self.dat["MAXSPEED"]**2 * self.dat["WINGAREA"])
+        
+        # Define the lift coefficient curve points
+        self.cl_angles.append(self.dat['CRITAOAM'] - self.dat['FLATCLR2'] - self.dat['CLDECAY2'])
+        self.cl_angles.append(self.dat['CRITAOAM'] - self.dat['FLATCLR2'])
+        self.cl_angles.append(self.dat['CRITAOAM'])
+        self.cl_angles.append(self.dat['CRITAOAP'])
+        self.cl_angles.append(self.dat['CRITAOAP'] + self.dat['FLATCLR1'])
+        self.cl_angles.append(self.dat['CRITAOAP'] + self.dat['FLATCLR1'] + self.dat['CLDECAY1'])
+        
+        self.cl_points.append(0)
+        self.cl_points.append(self.cl_zero + self.dat["CRITAOAM"] * self.cl_slope)
+        self.cl_points.append(self.cl_zero + self.dat["CRITAOAM"] * self.cl_slope)
+        self.cl_points.append(self.cl_zero + self.dat["CRITAOAM"] * self.cl_slope)
+        self.cl_points.append(self.cl_zero + self.dat["CRITAOAM"] * self.cl_slope)
+        self.cl_points.append(0)
+        
+    def calc_cl(self, aoa, flap_pct=0, vgw_pct=1):
+        """calculate a the lift coefficient at a provided angle of attack.
+        
+        inputs:
+        aoa (float, int): the angle of attack of the aircraft as a radian value.
+        flap_pct (float, int): the decimal percent that the flaps are deployed (0=clean/1=down)
+        vgw_pct (float, int): the decimal percent that the VGW are swept (0=forward/1=swept)
+        
+        outputs:
+        cl (float): the lift coefficient at the specified angle of attack.
+        """
+        
+        if isinstance(aoa, (float, int)) is False:
+            print("Error: [AirplaneDat.calc_cl] was expecting angle of attack input to be float or int. Got {}".format(type(aoa)))
+            raise TypeError
+            
+        # Modify the lift coefficient magnitude as required for flap and vgw
+        cl_points = [x + flap_pct * self.dat['CLBYFLAP'] for x in self.cl_points]
+        cl_points = [x - vgw_pct * self.dat['CLVARGEO'] for x in cl_points]
+                
+        # The lift coefficient points and angles can be used with linear interpolation to find the 
+        # lift coefficient at an angle of attack. Because the min and max y values for the lift coefficient 
+        # is zero, then any aoa values beyond the valid range of aoa values will also be zero which
+        # is desired.
+        return np.interp(aoa, self.cl_angles, cl_points)
+            
+    def calc_cd(self, aoa, flap_pct=0, vgw_pct=0, spoiler_pct=0, gear_pct=0, airspeed=0):
+        """Calculate the drag coefficicent of the aircraft at the provided angle of attack.
+        
+        inputs:
+        aoa (float, int): the angle of attack of the aircraft as a radian value.
+        flap_pct (float, int): the decimal percent that the flaps are deployed (0=clean/1=down)
+        vgw_pct (float, int): the decimal percent that the VGW are swept (0=forward/1=swept)
+        spoiler_pct (float, int): the decimal percent that the spoiler is extended (0=retracted/1=extended)
+        gear_pct (float, int): the decimal percent that the landing gear is extended (0=retracted/1=extended)
+        airspeed (float, int): the airspeed the aircraft is traveling.
+        
+        outputs:
+        cd (float): the drag coefficient at the specified angle of attack.
+        """
+        
+        if isinstance(aoa, (float, int)) is False:
+            print("Error: [AirplaneDat.calc_cd] was expecting angle of attack input to be float or int. Got {}".format(type(aoa)))
+            raise TypeError
+        
+        cd = self.cd_zero + self.cd_const * aoa**2
+        
+        # Acount for transonic drag
+        if airspeed > self.dat['CRITSPEED'] or (self.cd_max < self.cd_zero and self.dat['CRITSPED'] < self.dat['MAXSPEED']):
+            cd = cd + (self.cd_max - self.cd_zero) * (airspeed - self.dat['CRITSPED']) / (self.dat['MAXSPEED'] - self.dat['CRITSPED'])
+        
+        # Acount for effectors
+        cd = cd * (1 + self.dat['CDSPOILR'] * spoiler_pct) * (1 + self.dat['CDVARGEO'] * vgw_pct) * (1 + self.dat['CDBYFLAP'] * gear_pct) * (1 + self.dat['CDBYGEAR'] * gear_pct)
+        
+        return cd
+    
         
         
-                               
           
                     
 class ExCamera:
