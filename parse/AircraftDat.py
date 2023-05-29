@@ -98,8 +98,9 @@ def AircraftDat(filepath):
                     for i in range(int(parts[0])):
                         realprops[i] = dict()
 
-                # Handle dat variables that can be fully defined in a single line, but may 
-                # have the same dat variable and would thus be overwritten by just procesing as-is.
+                # Handle dat variables that can be fully defined in a single line, but multiple 
+                # definitions would be overwritten using the normal process because they use the 
+                # same DAT variable.
                 if datvar == "WPNSHAPE":
                     weaponshapes.append(WeaponShape(line))
                     continue  # No need for further analysis of this line
@@ -372,7 +373,7 @@ class AirplaneDat:
         """
         
         # TODO: Finish this section.
-        
+
         
     
         

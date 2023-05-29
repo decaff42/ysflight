@@ -3,7 +3,6 @@
 """
 Created on Sat May 13 18:18:18 2023
 
-@author: erikmccaffrey
 """
 
 # Import standard modules
