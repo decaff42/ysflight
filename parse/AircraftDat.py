@@ -104,7 +104,7 @@ def AircraftDat(filepath):
                     weaponshapes.append(WeaponShape(line))
                     continue  # No need for further analysis of this line
                 elif datvar == "HRDPOINT":
-                    hardpoints.append(HardPoints(line))
+                    hardpoints.append(HardPoints(line, len(hardpoints)))
                     continue  # No need for further analysis of this line
                 elif datvar == "LOADWEPN":
                     loadweapons[parts[0]] = int(parts[1])
@@ -210,8 +210,7 @@ class AirplaneDat:
             self.dat["FLATCLR2"] = convert_unit(determine_value_units("0deg"))
         if "CLDECAY1" not in self.dat.keys():
             self.dat["CLDECAY1"] = convert_unit(determine_value_units("0deg"))
-        if "CLDECAY2" not in self.dat.keys():
-            self.dat["CLDECAY2"] = convert_unit(determine_value_units("0deg"))
+        if "CLDECAY2" not in self.dat.keys():            self.dat["CLDECAY2"] = convert_unit(determine_value_units("0deg"))
         
         
     def autocalc(self):
@@ -304,7 +303,78 @@ class AirplaneDat:
         
         return cd
     
+    def calc_lift_force(self, aoa, flap_pct, vgw_pct, velocity, altitude):
+        """Calculate the lift force at the specified angle of attack.
         
+        inputs
+        aoa (int, float): the angle of attack in radians
+        flap_pct (float, int): the decimal percent that the flaps are deployed (0=clean/1=down)
+        vgw_pct (float, int): the decimal percent that the VGW are swept (0=forward/1=swept)
+        velocity (float, int): the aircraft's speed in meters per second
+        altitude (float, int): the aircraft's altitude in meters
+        
+        outputs
+        lift (float): the lift force in Newtons
+        """
+        
+        density = get_air_density(altitude)
+        cl = self.calc_cl(aoa, flap_pct, vgw_pct)
+        
+        return 0.5 * density * velocity**2 * self.dat['WINGAREA'] * cl
+    
+    
+    def calc_drag_force(self, aoa, velocity, altitude, flap_pct=0, vgw_pct=0, spoiler_pct=0, gear_pct=0):
+        """Calculate the drag force on the aircraft at the specified conditions
+        
+        inputs:
+        aoa (float, int): the angle of attack of the aircraft as a radian value.
+        flap_pct (float, int): the decimal percent that the flaps are deployed (0=clean/1=down)
+        vgw_pct (float, int): the decimal percent that the VGW are swept (0=forward/1=swept)
+        spoiler_pct (float, int): the decimal percent that the spoiler is extended (0=retracted/1=extended)
+        gear_pct (float, int): the decimal percent that the landing gear is extended (0=retracted/1=extended)
+        velocity (float, int): the airspeed the aircraft is traveling.
+        altitude (float, int): the aircraft's altitude in meters
+        
+        outputs:
+        drag (float): the drag force in Newtons
+        """
+        
+        density = get_air_density(altitude)
+        cd = self.calc_cd(aoa, flap_pct, vgw_pct, spoiler_pct, gear_pct, velocity)
+        
+        return 0.5 * density * velocity**2 * self.dat['WINGAREA'] * cd
+    
+    
+    def calc_required_throttle(self, altitude, velocity, flap_pct, vgw_pct, spoiler_pct, gear_pct, g = 1):
+        """Calculate the required throttle for straight and level flight (g=1) unless overridden with a g loading.
+        
+        inputs:
+        flap_pct (float, int): the decimal percent that the flaps are deployed (0=clean/1=down)
+        vgw_pct (float, int): the decimal percent that the VGW are swept (0=forward/1=swept)
+        spoiler_pct (float, int): the decimal percent that the spoiler is extended (0=retracted/1=extended)
+        gear_pct (float, int): the decimal percent that the landing gear is extended (0=retracted/1=extended)
+        velocity (float, int): the airspeed the aircraft is traveling.
+        altitude (float, int): the aircraft's altitude in meters
+        g (float, int): the g loading of the aircraft.
+        
+        outputs:
+        throttle_setting (float): throttle position
+        afterburner (Boolean): indication if afterburner is required.
+        """
+        
+        # TODO: Finish this section
+        
+    def assign_weapon_config_event(self, wonconfig):
+        """Assign weapons to hardpoints based on the YSF file weapon config event block.
+        
+        inputs:
+        wpnconfig (dict): keys = weapon types, value = count of weapons
+        """
+        
+        # TODO: Finish this section.
+        
+        
+    
         
           
                     
@@ -318,13 +388,15 @@ class ExCamera:
         
                     
 class HardPoints:
-    def __init__(self, line):
+    def __init__(self, line, count):
         self.line = line
         self.internal = False
         self.position = [0, 0, 0]  # Default position
         self.weapon_count = dict()
         for i in YSFLIGHT_WEAPON_NAMES:
             self.weapon_count[i] = 0
+            
+        self.current_load = (None, None)  # indication of type and quantity of weapon on hardpoint.
             
         self.parse()        
         
