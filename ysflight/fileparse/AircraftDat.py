@@ -47,7 +47,7 @@ import numpy as np
 # Import YSFlight Modules
 from ..file import import_file
 from ..unts import convert_unit, determine_value_units
-from ..simulation.simulation import YSFLIGHT_G, get_air_density, calculate_thrust
+from ..simulation import YSFLIGHT_G, get_air_density, calculate_thrust
 
 
 def AircraftDat(filepath):

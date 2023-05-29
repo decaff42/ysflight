@@ -12,7 +12,7 @@ import math
 
 
 # Import YSFlight module
-from ..simulation.simulation import YSFLIGHT_G
+from ysflight.simulation import YSFLIGHT_G
 
 # Define valid units for YSFLIGHT and organize for different types of units.
 YSFLIGHT_SPEED_UNITS = ["MACH", "M/S", "KT", "KM/H"]
