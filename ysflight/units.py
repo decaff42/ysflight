@@ -87,6 +87,7 @@ def determine_value_units(raw_value):
     value = raw_value.upper()
     for unit in VALID_YSFLIGHT_UNITS:
         if value.endswith(unit):
+            # print(value, unit)
             return float(value.split(unit)[0]), unit
     
     # If the input value is something else and a string, then it is a string input

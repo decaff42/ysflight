@@ -34,7 +34,8 @@ YSFLIGHT_DAT_NONDIM_VARS = ["STRENGTH", "RADARCRS", "FLAPPOSI", "CLBYFLAP", "CDB
                             "GUNPOWER", "ISPNLSCL", "SMOKECOL", "NMTURRET", "CLVARGEO", "CDVARGEO", "CTLINVGW", 
                             "SCRNCNTR", "INITZOOM", "INITIGUN", "BMBAYRCS", "INITAAAM", "INITHDBM", "MAXNMFLR", 
                             "INITAAMM", "MAXNAAMM", "INITB250", "MAXNB250", "INITRCKT", "INITIAGM", "MAXNBOMB", 
-                            "MAXNMAGM", "MAXNMAAM", "MAXNMRKT", "INITIAAM", "MAXNMGUN", "NMACHNGN"]
+                            "MAXNMAGM", "MAXNMAAM", "MAXNMRKT", "INITIAAM", "MAXNMGUN", "NMACHNGN", "WEAPONCH", 
+                            "REFTCRUS", "REFTHRLD"]
 
 YSFLIGHT_WEAPON_NAMES = ["B500", "B500HD", "B250", "RKT", "FUEL", "AGM65", "AIM9X", "AIM9", "AIM120"]
 
@@ -46,7 +47,7 @@ import numpy as np
 
 # Import YSFlight Modules
 from ..file import import_file
-from ..unts import convert_unit, determine_value_units
+from ..units import convert_unit, determine_value_units
 from ..simulation import YSFLIGHT_G, get_air_density, calculate_thrust
 
 
@@ -78,6 +79,7 @@ def AircraftDat(filepath):
     realprops = dict()
     loadweapons = dict()
     excameras = list()
+    flap_positions = list()
     for key in YSFLIGHT_WEAPON_NAMES:
         loadweapons[key] = 0
     
@@ -116,6 +118,8 @@ def AircraftDat(filepath):
                 elif datvar == "EXCAMERA":
                     excameras.append(ExCamera(line))
                     continue  # No need for further analysis of this line
+                elif datvar == "FLAPPOSI":
+                    flap_positions.append(float(parts[0].split()[1]))
                         
                 # Assign values for properties that take mulitple lines to fully define.
                 if datvar in YSFLIGHT_DAT_TURRET_VARS:
@@ -131,6 +135,7 @@ def AircraftDat(filepath):
                             if units not in ["STRING", "NUMBER", "BOOL"]:    
                                 parts[idx] = convert_unit(value, units)
                         turrets[turret_id][datvar] = parts
+                        
                 elif datvar == "REALPROP":
                     engine_id = int(parts[0])
                     parts = parts[1:]
@@ -141,17 +146,31 @@ def AircraftDat(filepath):
                             parts[idx] = convert_unit(value, units)
                             
                     realprops[engine_id][datvar] = parts
-
+                
+                elif datvar in YSFLIGHT_DAT_NONDIM_VARS:
+                    try:
+                        dat[datvar] = float(parts[0])
+                    except ValueError:
+                        dat[datvar] = parts[0]
+                        
+                elif datvar in YSFLIGHT_DAT_BOOL_VARS:
+                    dat[datvar] = determine_value_units(parts[0])[0]
+                        
                 else:
                     for idx, part in enumerate(parts):
                         value, units = determine_value_units(part)
                         if units not in ["STRING", "NUMBER", "BOOL"]:
+                            # print(line)
                             parts[idx] = convert_unit(value, units)
-                    dat[datvar] = parts
+                            
+                    if len(parts) == 1:
+                        dat[datvar] = parts[0]
+                    else:
+                        dat[datvar] = parts
                 
     
     # Package up into class
-    DAT = AirplaneDat(dat, smokecols, turrets, weaponshapes, hardpoints, realprops, loadweapons, excameras)
+    DAT = AirplaneDat(dat, smokecols, turrets, weaponshapes, hardpoints, realprops, loadweapons, excameras, flap_positions)
 
     return DAT
     
@@ -159,7 +178,7 @@ def AircraftDat(filepath):
     
     
 class AirplaneDat:
-    def __init__(self, dat, smokecols, turrets, weaponshapes, hardpoints, realprops, loadweapons, excameras):
+    def __init__(self, dat, smokecols, turrets, weaponshapes, hardpoints, realprops, loadweapons, excameras, flap_positions):
         self.dat = dat
         self.smokecols = smokecols
         self.turrets = turrets
@@ -168,6 +187,7 @@ class AirplaneDat:
         self.realprops = realprops
         self.loadweapons = loadweapons
         self.excameras = excameras
+        self.flap_positions = flap_positions
         
         # Define class properties
         self.cl_zero = np.nan
@@ -193,6 +213,7 @@ class AirplaneDat:
     def apply_defaults(self):
         """Ensure dat file has default values incorporated incase something requires them."""
         
+        # Handle DAT Values
         if "PROPELLR" in self.dat.keys() and "PROPEFCY" not in self.dat.keys():
             self.dat["PROPEFCY"] = 0.7
         if "PROPELLR" in self.dat.keys() and "PROPVMIN" not in self.dat.keys():
@@ -200,32 +221,48 @@ class AirplaneDat:
         if "AIRCLASS" not in self.dat.keys():
             self.dat["AIRCLASS"] = "AIRPLANE"
         if "VGWSPED1" not in self.dat.keys():
-            self.dat["VGWSPED1"] = convert_unit(determine_value_units("0.3MACH"))
+            self.dat["VGWSPED1"] = convert_unit(0.3, "MACH")
         if "VGWSPED2" not in self.dat.keys():
-            self.dat["VGWSPED2"] = convert_unit(determine_value_units("0.8MACH"))
+            self.dat["VGWSPED2"] = convert_unit(0.8, "MACH")
         if "MAXCDAOA" not in self.dat.keys():
-            self.dat["MAXCDAOA"] = convert_unit(determine_value_units("45deg"))
+            self.dat["MAXCDAOA"] = convert_unit(45, "DEG")
         if "FLATCLR1" not in self.dat.keys():
-            self.dat["FLATCLR1"] = convert_unit(determine_value_units("0deg"))
+            self.dat["FLATCLR1"] = convert_unit(0, "DEG")  # Unit conversion shouldn't be necessary, but included.
         if "FLATCLR2" not in self.dat.keys():
-            self.dat["FLATCLR2"] = convert_unit(determine_value_units("0deg"))
+            self.dat["FLATCLR2"] = convert_unit(0, "DEG")  # Unit conversion shouldn't be necessary, but included.
         if "CLDECAY1" not in self.dat.keys():
-            self.dat["CLDECAY1"] = convert_unit(determine_value_units("0deg"))
-        if "CLDECAY2" not in self.dat.keys():            self.dat["CLDECAY2"] = convert_unit(determine_value_units("0deg"))
+            self.dat["CLDECAY1"] = convert_unit(0, "DEG")  # Unit conversion shouldn't be necessary, but included.
+        if "CLDECAY2" not in self.dat.keys():            
+            self.dat["CLDECAY2"] = convert_unit(0, "DEG")  # Unit conversion shouldn't be necessary, but included.
+        if "PSTMPTCH" not in self.dat.keys():
+            self.dat['PSTMPTCH'] = 0
+        if "PSTMYAW_" not in self.dat.keys():
+            self.dat['PSTMYAW_'] = 0    
+        if "PSTMROLL" not in self.dat.keys():
+            self.dat['PSTMROLL'] = 0
+        if "VAPORPO0" not in self.dat.keys():
+            self.dat["VAPORPO0"] = [5,0,0]
+        if "VAPORPO1" not in self.dat.keys():
+            self.dat["VAPORPO1"] = [5,0,0]
+            
+        # Handle other property values
+        if len(self.flap_positions) == 0:
+            self.flap_positions = [0, 0.25, 0.5, 0.75, 1.0]  # default from fsairplaneproperty.cpp
         
         
     def autocalc(self):
         """Automatically calculate the properties from the dat file."""
         
         # Caluclate CL properties
-        self.cl_zero = YSFLIGHT_G * (self.dat['WEIGHCLN'] + self.dat["WEIGHTFUEL"]) / (0.5 * get_air_density(self.dat['REFACRUS']) * self.dat['REFVCRUS']**2 * self.dat['WINGAREA'])
+        # print(type(self.dat['WEIGHCLN']),self.dat['WEIGHCLN'], type(self.dat['WEIGFUEL']),self.dat['WEIGFUEL'], type(self.dat['REFACRUS']), self.dat['REFACRUS'], type(self.dat['REFVCRUS']), self.dat['REFVCRUS'], type(self.dat['WINGAREA']), self.dat['WINGAREA'])
+        self.cl_zero = YSFLIGHT_G * (self.dat['WEIGHCLN'] + self.dat["WEIGFUEL"]) / (0.5 * get_air_density(self.dat['REFACRUS']) * self.dat['REFVCRUS']**2 * self.dat['WINGAREA'])
         self.cl_land = YSFLIGHT_G * (self.dat['WEIGHCLN'] + self.dat['WEIGFUEL']) / (0.5 * get_air_density(0) * self.dat['REFVCRUS']**2 * self.dat['WINGAREA']) * (1 / (1 + self.dat['CLBYFLAP'])) * (1 / (1 + self.dat['CLVARGEO']))
         self.cl_slope = (self.cl_land - self.cl_zero) / (self.dat['REFAOALD'])
         
         # Calculate Thrust values
         self.t_cruise = calculate_thrust(self.dat['REFACRUS'], self.dat['REFVCRUS'], self.dat['REFTCRUS'], False, self.dat, self.realprops)
         self.t_vmax = calculate_thrust(self.dat['REFACRUS'], self.dat['MAXSPEED'], 1.0, True, self.dat, self.realprops)
-        self.t_landing = calculate_thrust(0, self.dat['REFVLAND'], self.dat['REFTLAND'], False, self.dat, self.realprops)
+        self.t_landing = calculate_thrust(0, self.dat['REFVLAND'], self.dat['REFTHRLD'], False, self.dat, self.realprops)
         
         # Calculate drag properties
         self.cd_zero = self.t_cruise / (0.5 * get_air_density(self.dat["REFACRUS"]) * self.dat["REFVCRUS"]**2 * self.dat["WINGAREA"])
@@ -274,7 +311,7 @@ class AirplaneDat:
         # is desired.
         return np.interp(aoa, self.cl_angles, cl_points)
             
-    def calc_cd(self, aoa, flap_pct=0, vgw_pct=0, spoiler_pct=0, gear_pct=0, airspeed=0):
+    def calc_cd(self, aoa, flap_pct=0, vgw_pct=-1, spoiler_pct=0, gear_pct=0, airspeed=0):
         """Calculate the drag coefficicent of the aircraft at the provided angle of attack.
         
         inputs:
@@ -292,6 +329,12 @@ class AirplaneDat:
         if isinstance(aoa, (float, int)) is False:
             print("Error: [AirplaneDat.calc_cd] was expecting angle of attack input to be float or int. Got {}".format(type(aoa)))
             raise TypeError
+            
+        if vgw_pct == -1 and self.dat['VARGEOMW'] == True:
+            # Need to calculate the vgw_percent since it has not been provided. 
+            vgw_pct = self.calculate_vgw_position(airspeed)
+        else:
+            vgw_pct = 1
         
         cd = self.cd_zero + self.cd_const * aoa**2
         
@@ -303,6 +346,28 @@ class AirplaneDat:
         cd = cd * (1 + self.dat['CDSPOILR'] * spoiler_pct) * (1 + self.dat['CDVARGEO'] * vgw_pct) * (1 + self.dat['CDBYFLAP'] * gear_pct) * (1 + self.dat['CDBYGEAR'] * gear_pct)
         
         return cd
+    
+    def calculate_vgw_position(self, airspeed):
+        """Calculate the current vgw position based on the current air speed.
+        
+        inputs
+        airspeed (float, int): speed of aircraft in m/s
+        
+        outputs
+        vgw_pct (float): 0=fully spread, 1=fully swept
+        """
+        
+        if self.dat['VARGEOMW'] == False:
+            # if no VGW, just use return fully swept for no impact
+            return 1
+        
+        elif airspeed <= self.dat['VGWSPED1']:
+            return 0
+        elif airspeed >= self.dat['VGWSPED2']:
+            return 1
+        else:
+            return np.interp(airspeed, [self.dat['VGWSPED1'], self.dat['VGWSPED2']], [0, 1])
+        
     
     def calc_lift_force(self, aoa, flap_pct, vgw_pct, velocity, altitude):
         """Calculate the lift force at the specified angle of attack.
@@ -384,8 +449,16 @@ class ExCamera:
         self.line = line
         self.location = line.split()[-1]  # INSIDE, OUTSIDE, CABIN
         self.name = line.split('"')[1]
-        self.position = [convert_unit(determine_value_units(pos)) for pos in line.split()[2:5]]
-        self.orientation = [convert_unit(determine_value_units(angle)) for angle in line.split()[5:8]]
+        
+        self.position = list()
+        for pos in line.split()[2:5]:
+            value, units = determine_value_units(pos)
+            self.position.append(convert_unit(value, units))
+        
+        self.orientation = list()
+        for pos in line.split()[5:8]:
+            value, units = determine_value_units(pos)
+            self.orientation.append(convert_unit(value, units))
         
                     
 class HardPoints:
@@ -403,13 +476,18 @@ class HardPoints:
         
     def parse(self):
         parts = self.line.split()
-        self.position = [convert_unit(determine_value_units(pos)) for pos in parts[1:4]]
+        idx = 0
+        for pos in parts[1:4]:
+            value, units = determine_value_units(pos)
+            self.position[idx] = convert_unit(value, units)
+            idx += 1
+        # self.position = [convert_unit(determine_value_units(pos)) for pos in parts[1:4]]
         
         if "$INTERNAL" in parts:
             self.internal = True
         
         for element in parts[4:]:
-            if element.startswith(YSFLIGHT_WEAPON_NAMES):
+            if any(element.startswith(wpn_name) for wpn_name in YSFLIGHT_WEAPON_NAMES):
                 element.replace("&", "*")
                 values = element.split("*")
                 if len(values) == 1:
